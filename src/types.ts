@@ -9,12 +9,23 @@ export type Message = {
   at: number;
 };
 
+export type Gender = "male" | "female" | "other";
+
+// ข้อมูลผู้ป่วยที่พยาบาลกรอกเอง (ไม่ได้มาจาก LINE)
+export type Patient = {
+  name: string;
+  gender?: Gender;
+  age?: number;
+  address: string;
+};
+
 export type Chat = {
   id: string; // userId หรือ groupId
   kind: "user" | "group";
   name: string;
   messages: Message[];
   unread: number;
+  patient?: Patient;
 };
 
 // รูปแบบ event ที่ LINE ส่งมา (เฉพาะส่วนที่ใช้)
