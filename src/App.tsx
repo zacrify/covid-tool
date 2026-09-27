@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { pushText } from "./line";
-import { addMessage, clearAll, markRead, setPatient, useChats } from "./store";
+import { addAtkResult, addMessage, clearAll, createMockChat, markRead, setPatient, useChats } from "./store";
 import type { Chat, Gender, Message, Patient } from "./types";
 import { listenWebhook } from "./webhook";
 
 const time = (t: number) => new Date(t).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+const dateTime = (t: number) => new Date(t).toLocaleString("th-TH", {
+  day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+});
 
 export default function App() {
   const chats = useChats();
@@ -25,7 +28,12 @@ export default function App() {
             ล้าง
           </button>
         </header>
-        {chats.length === 0 && <p className="hint">ยังไม่มีแชท ส่งข้อความจาก LINE simulator ก่อน</p>}
+        {chats.length === 0 && (
+          <div className="sidebar-empty">
+            <p className="hint">ยังไม่มีแชท ส่งข้อความจาก LINE simulator ก่อน</p>
+            <button className="demo-button" onClick={createMockChat}>สร้างเคสตัวอย่าง</button>
+          </div>
+        )}
         {chats.map((c) => (
           <button key={c.id} className={`chat-item ${c.id === selectedId ? "active" : ""}`} onClick={() => setSelectedId(c.id)}>
             <span className="avatar">{c.kind === "group" ? "👥" : "🧑"}</span>
@@ -38,13 +46,14 @@ export default function App() {
         ))}
       </aside>
       <main className="chat">{selected ? <ChatPanel chat={selected} /> : <p className="hint">เลือกแชทจากด้านซ้าย</p>}</main>
+      {selected && <AtkPanel chat={selected} />}
     </div>
   );
 }
 
 function preview(m?: Message) {
   if (!m) return "";
-  const body = m.type === "text" ? m.text : m.type === "image" ? "📷 รูปภาพ" : `📎 ${m.fileName}`;
+  const body = m.type === "text" ? m.text : m.type === "image" ? "📷 รูปภาพ" : m.type === "atk" ? "🧪 ส่งผลตรวจ ATK" : `📎 ${m.fileName}`;
   return `${m.from === "nurse" ? "คุณ: " : ""}${body}`;
 }
 
@@ -102,6 +111,15 @@ function ChatPanel({ chat }: { chat: Chat }) {
               <a href={m.contentUrl} target="_blank" rel="noreferrer">
                 📎 {m.fileName}
               </a>
+            )}
+            {m.type === "atk" && (
+              <>
+                {m.contentUrl && <img className="atk-photo" src={m.contentUrl} alt={`รูปผลตรวจ ATK${m.fileName ? ` ${m.fileName}` : ""}`} />}
+                <span className="atk-message">
+                  <span className="atk-icon">🧪</span>
+                  <span><strong>ส่งผลตรวจ ATK</strong><small>{m.text}</small></span>
+                </span>
+              </>
             )}
             <time>{time(m.at)}</time>
           </div>
@@ -190,5 +208,94 @@ function PatientForm({ chat, onDone }: { chat: Chat; onDone: () => void }) {
         </button>
       </div>
     </form>
+  );
+}
+
+function AtkPanel({ chat }: { chat: Chat }) {
+  const [showMock, setShowMock] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageName, setImageName] = useState("");
+  const [imageError, setImageError] = useState<string | null>(null);
+  const results = chat.atkResults ?? [];
+
+  function submitMock(result: "negative" | "positive") {
+    if (!imageUrl) return;
+    const recordedAt = Date.now();
+    addAtkResult(chat, { id: `atk-${recordedAt}`, result, imageUrl, imageName, recordedAt });
+    setShowMock(false);
+    setImageUrl(null);
+    setImageName("");
+    setImageError(null);
+  }
+
+  function selectImage(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setImageError("กรุณาเลือกไฟล์รูปภาพเท่านั้น");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setImageError("รูปต้องมีขนาดไม่เกิน 2 MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImageUrl(String(reader.result));
+      setImageName(file.name);
+      setImageError(null);
+    };
+    reader.onerror = () => setImageError("อ่านไฟล์รูปไม่สำเร็จ กรุณาลองใหม่");
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <aside className="atk-panel">
+      <header>
+        <div>
+          <span className="eyebrow">ข้อมูลสุขภาพ</span>
+          <h2>ผลตรวจ ATK</h2>
+        </div>
+        <span className="result-count">{results.length}</span>
+      </header>
+
+      <button className="mock-button" onClick={() => setShowMock(!showMock)}>
+        <span>＋</span> จำลองคนไข้ส่งผล
+      </button>
+
+      {showMock && (
+        <div className="mock-card">
+          <strong>เลือกผลตรวจที่ส่งเข้ามา</strong>
+          <small>แนบรูปผลตรวจ แล้วระบบจะบันทึกวันและเวลาปัจจุบัน</small>
+          <label className={`image-picker ${imageUrl ? "has-image" : ""}`}>
+            {imageUrl ? (
+              <><img src={imageUrl} alt="ตัวอย่างรูปผลตรวจ ATK" /><span>เปลี่ยนรูป</span></>
+            ) : (
+              <><span className="upload-icon">▧</span><strong>แนบรูปผลตรวจ ATK</strong><small>JPG, PNG ไม่เกิน 2 MB</small></>
+            )}
+            <input type="file" accept="image/*" onChange={(e) => selectImage(e.target.files?.[0])} />
+          </label>
+          {imageError && <span className="image-error">{imageError}</span>}
+          <div className="mock-actions">
+            <button className="negative" disabled={!imageUrl} onClick={() => submitMock("negative")}>ไม่พบเชื้อ</button>
+            <button className="positive" disabled={!imageUrl} onClick={() => submitMock("positive")}>พบเชื้อ</button>
+          </div>
+        </div>
+      )}
+
+      <div className="result-list">
+        {results.length === 0 ? (
+          <div className="empty-results"><span>🧪</span><strong>ยังไม่มีผลตรวจ</strong><small>ผล ATK ที่คนไข้ส่งมาจะแสดงที่นี่</small></div>
+        ) : results.map((item) => (
+          <article className="result-card" key={item.id}>
+            {item.imageUrl && <img className="result-photo" src={item.imageUrl} alt={`รูปผลตรวจ ATK${item.imageName ? ` ${item.imageName}` : ""}`} />}
+            <div className={`result-status ${item.result}`}>
+              <span>{item.result === "negative" ? "✓" : "!"}</span>
+              <div><small>ผลตรวจ</small><strong>{item.result === "negative" ? "ไม่พบเชื้อ" : "พบเชื้อ"}</strong></div>
+            </div>
+            <div className="recorded-time"><span>◷</span><div><small>บันทึกเมื่อ</small><time>{dateTime(item.recordedAt)} น.</time></div></div>
+          </article>
+        ))}
+      </div>
+    </aside>
   );
 }

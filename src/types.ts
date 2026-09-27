@@ -2,7 +2,7 @@ export type Message = {
   id: string;
   from: "patient" | "nurse";
   name: string;
-  type: "text" | "image" | "file";
+  type: "text" | "image" | "file" | "atk";
   text?: string;
   fileName?: string;
   contentUrl?: string;
@@ -19,11 +19,20 @@ export type Patient = {
   address: string;
 };
 
+export type AtkResult = {
+  id: string;
+  result: "negative" | "positive";
+  imageUrl?: string;
+  imageName?: string;
+  recordedAt: number;
+};
+
 export type Chat = {
   id: string; // userId หรือ groupId
   kind: "user" | "group";
   name: string;
   messages: Message[];
+  atkResults?: AtkResult[];
   unread: number;
   patient?: Patient;
 };
