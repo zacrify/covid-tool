@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { pushText } from "./line";
-import { addAtkResult, addMessage, clearAll, createMockChat, markRead, setPatient, useChats } from "./store";
+import { addAtkResult, addMessage, clearAll, markRead, setPatient, useChats } from "./store";
 import type { Chat, Gender, Message, Patient } from "./types";
 import { listenWebhook } from "./webhook";
 
@@ -28,12 +28,7 @@ export default function App() {
             ล้าง
           </button>
         </header>
-        {chats.length === 0 && (
-          <div className="sidebar-empty">
-            <p className="hint">ยังไม่มีแชท ส่งข้อความจาก LINE simulator ก่อน</p>
-            <button className="demo-button" onClick={createMockChat}>สร้างเคสตัวอย่าง</button>
-          </div>
-        )}
+        {chats.length === 0 && <p className="hint">ยังไม่มีแชท ส่งข้อความจาก LINE simulator ก่อน</p>}
         {chats.map((c) => (
           <button key={c.id} className={`chat-item ${c.id === selectedId ? "active" : ""}`} onClick={() => setSelectedId(c.id)}>
             <span className="avatar">{c.kind === "group" ? "👥" : "🧑"}</span>
@@ -212,32 +207,18 @@ function PatientForm({ chat, onDone }: { chat: Chat; onDone: () => void }) {
 }
 
 function AtkPanel({ chat }: { chat: Chat }) {
-  const [showMock, setShowMock] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [imageName, setImageName] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [result, setResult] = useState<"negative" | "positive">("negative");
+  const [recordedAt, setRecordedAt] = useState(toDateTimeInput(Date.now()));
+  const [imageUrl, setImageUrl] = useState<string | undefined>();
+  const [imageName, setImageName] = useState<string | undefined>();
   const [imageError, setImageError] = useState<string | null>(null);
   const results = chat.atkResults ?? [];
 
-  function submitMock(result: "negative" | "positive") {
-    if (!imageUrl) return;
-    const recordedAt = Date.now();
-    addAtkResult(chat, { id: `atk-${recordedAt}`, result, imageUrl, imageName, recordedAt });
-    setShowMock(false);
-    setImageUrl(null);
-    setImageName("");
-    setImageError(null);
-  }
-
   function selectImage(file?: File) {
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setImageError("กรุณาเลือกไฟล์รูปภาพเท่านั้น");
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      setImageError("รูปต้องมีขนาดไม่เกิน 2 MB");
-      return;
-    }
+    if (!file.type.startsWith("image/")) return setImageError("กรุณาเลือกไฟล์รูปภาพเท่านั้น");
+    if (file.size > 2 * 1024 * 1024) return setImageError("รูปต้องมีขนาดไม่เกิน 2 MB");
     const reader = new FileReader();
     reader.onload = () => {
       setImageUrl(String(reader.result));
@@ -246,6 +227,18 @@ function AtkPanel({ chat }: { chat: Chat }) {
     };
     reader.onerror = () => setImageError("อ่านไฟล์รูปไม่สำเร็จ กรุณาลองใหม่");
     reader.readAsDataURL(file);
+  }
+
+  function save(e: React.FormEvent) {
+    e.preventDefault();
+    const timestamp = new Date(recordedAt).getTime();
+    if (!Number.isFinite(timestamp)) return;
+    addAtkResult(chat.id, { id: `atk-${Date.now()}`, result, recordedAt: timestamp, imageUrl, imageName });
+    setEditing(false);
+    setRecordedAt(toDateTimeInput(Date.now()));
+    setImageUrl(undefined);
+    setImageName(undefined);
+    setImageError(null);
   }
 
   return (
@@ -258,28 +251,31 @@ function AtkPanel({ chat }: { chat: Chat }) {
         <span className="result-count">{results.length}</span>
       </header>
 
-      <button className="mock-button" onClick={() => setShowMock(!showMock)}>
-        <span>＋</span> จำลองคนไข้ส่งผล
+      <button className="add-result-button" onClick={() => setEditing((value) => !value)}>
+        {editing ? "ปิดฟอร์ม" : "+ บันทึกผล ATK"}
       </button>
 
-      {showMock && (
-        <div className="mock-card">
-          <strong>เลือกผลตรวจที่ส่งเข้ามา</strong>
-          <small>แนบรูปผลตรวจ แล้วระบบจะบันทึกวันและเวลาปัจจุบัน</small>
-          <label className={`image-picker ${imageUrl ? "has-image" : ""}`}>
-            {imageUrl ? (
-              <><img src={imageUrl} alt="ตัวอย่างรูปผลตรวจ ATK" /><span>เปลี่ยนรูป</span></>
-            ) : (
-              <><span className="upload-icon">▧</span><strong>แนบรูปผลตรวจ ATK</strong><small>JPG, PNG ไม่เกิน 2 MB</small></>
-            )}
+      {editing && (
+        <form className="atk-form" onSubmit={save}>
+          <label>
+            ผลตรวจ
+            <select value={result} onChange={(e) => setResult(e.target.value as "negative" | "positive") }>
+              <option value="negative">ไม่พบเชื้อ</option>
+              <option value="positive">พบเชื้อ</option>
+            </select>
+          </label>
+          <label>
+            วันและเวลาตรวจ
+            <input type="datetime-local" value={recordedAt} onChange={(e) => setRecordedAt(e.target.value)} required />
+          </label>
+          <label className="atk-image-field">
+            รูปผลตรวจ (ถ้ามี)
             <input type="file" accept="image/*" onChange={(e) => selectImage(e.target.files?.[0])} />
           </label>
+          {imageUrl && <img className="form-image-preview" src={imageUrl} alt="ตัวอย่างรูปผลตรวจ ATK" />}
           {imageError && <span className="image-error">{imageError}</span>}
-          <div className="mock-actions">
-            <button className="negative" disabled={!imageUrl} onClick={() => submitMock("negative")}>ไม่พบเชื้อ</button>
-            <button className="positive" disabled={!imageUrl} onClick={() => submitMock("positive")}>พบเชื้อ</button>
-          </div>
-        </div>
+          <button className="save-result-button" type="submit">บันทึกผลตรวจ</button>
+        </form>
       )}
 
       <div className="result-list">
@@ -298,4 +294,9 @@ function AtkPanel({ chat }: { chat: Chat }) {
       </div>
     </aside>
   );
+}
+
+function toDateTimeInput(timestamp: number) {
+  const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60_000);
+  return date.toISOString().slice(0, 16);
 }

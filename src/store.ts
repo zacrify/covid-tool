@@ -32,25 +32,11 @@ export function addMessage(chat: Omit<Chat, "messages" | "unread">, msg: Message
   commit([updated, ...chats.filter((c) => c.id !== chat.id)]);
 }
 
-export function addAtkResult(chat: Chat, result: AtkResult) {
-  if (chat.atkResults?.some((item) => item.id === result.id)) return;
-  const message: Message = {
-    id: `message-${result.id}`,
-    from: "patient",
-    name: chat.name,
-    type: "atk",
-    text: result.result === "negative" ? "ผลไม่พบเชื้อ" : "ผลพบเชื้อ",
-    contentUrl: result.imageUrl,
-    fileName: result.imageName,
-    at: result.recordedAt,
-  };
-  const updated: Chat = {
+export function addAtkResult(chatId: string, result: AtkResult) {
+  commit(chats.map((chat) => chat.id !== chatId ? chat : {
     ...chat,
-    unread: chat.unread + 1,
     atkResults: [result, ...(chat.atkResults ?? [])],
-    messages: [...chat.messages, message],
-  };
-  commit([updated, ...chats.filter((c) => c.id !== chat.id)]);
+  }));
 }
 
 export function markRead(chatId: string) {
@@ -63,25 +49,4 @@ export function setPatient(chatId: string, patient: Patient | undefined) {
 
 export function clearAll() {
   commit([]);
-}
-
-export function createMockChat() {
-  if (chats.some((chat) => chat.id === "mock-patient")) return;
-  const now = Date.now();
-  const mock: Chat = {
-    id: "mock-patient",
-    kind: "user",
-    name: "คนไข้ตัวอย่าง",
-    unread: 1,
-    atkResults: [],
-    messages: [{
-      id: `mock-${now}`,
-      from: "patient",
-      name: "คนไข้ตัวอย่าง",
-      type: "text",
-      text: "สวัสดีค่ะ ต้องส่งผล ATK ทางนี้ใช่ไหมคะ",
-      at: now,
-    }],
-  };
-  commit([mock, ...chats]);
 }

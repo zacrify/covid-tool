@@ -23,3 +23,4 @@ cd ../line-sim && pnpm start   # http://localhost:5531
 - `vite.config.ts` มี plugin เล็ก ๆ รับ `POST /api/line/webhook` (เช็ค `x-line-signature`) แล้วส่งต่อให้หน้าเว็บผ่าน SSE ที่ `/api/events`
 - หน้าเว็บเรียก LINE API ผ่าน proxy `/line/*` → `LINE_API_BASE`
 - ข้อมูลแชททั้งหมดอยู่ใน `localStorage` key `covid-tool.chats`
+- รูปภาพจาก webhook แสดงในแชทตามปกติ ส่วนผล ATK ให้พยาบาลบันทึกผล วันเวลา และรูปหลักฐานในแถบด้านขวา
