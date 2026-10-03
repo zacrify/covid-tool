@@ -28,6 +28,13 @@ export type AtkResult = {
   recordedAt: number;
 };
 
+// Symptom note written by the nurse
+export type SymptomNote = {
+  id: string;
+  text: string;
+  at: number;
+};
+
 export type Chat = {
   id: string; // userId หรือ groupId
   kind: "user" | "group";
@@ -36,6 +43,7 @@ export type Chat = {
   unread: number;
   patient?: Patient;
   atkResults?: AtkResult[];
+  notes?: SymptomNote[];
 };
 
 // รูปแบบ event ที่ LINE ส่งมา (เฉพาะส่วนที่ใช้)

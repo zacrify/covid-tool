@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { AtkResult, Chat, Message, Patient } from "./types";
+import type { AtkResult, Chat, Message, Patient, SymptomNote } from "./types";
 
 // ฐานข้อมูล = localStorage อย่างเดียว (prototype)
 const KEY = "covid-tool.chats";
@@ -42,6 +42,10 @@ export function setPatient(chatId: string, patient: Patient | undefined) {
 
 export function addAtkResult(chatId: string, result: AtkResult) {
   commit(chats.map((c) => (c.id === chatId ? { ...c, atkResults: [result, ...(c.atkResults ?? [])] } : c)));
+}
+
+export function addNote(chatId: string, note: SymptomNote) {
+  commit(chats.map((c) => (c.id === chatId ? { ...c, notes: [note, ...(c.notes ?? [])] } : c)));
 }
 
 export function clearAll() {

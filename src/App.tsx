@@ -1,11 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { pushText } from "./line";
-import { addAtkResult, addMessage, clearAll, markRead, setPatient, useChats } from "./store";
-import type { AtkResult, Chat, Gender, Message, Patient } from "./types";
+import { addAtkResult, addMessage, addNote, clearAll, markRead, setPatient, useChats } from "./store";
+import type { AtkResult, Chat, Gender, Message, Patient, SymptomNote } from "./types";
 import { listenWebhook } from "./webhook";
 
 const time = (t: number) => new Date(t).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+const QUARANTINE_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Days of quarantine left, counted from the latest positive ATK result. null = not in quarantine.
+function quarantineDaysLeft(chat: Chat, now: number): number | null {
+  const positive = (chat.atkResults ?? []).filter((r) => r.result === "positive");
+  if (positive.length === 0) return null;
+  const start = Math.max(...positive.map((r) => r.recordedAt));
+  const left = Math.ceil((start + QUARANTINE_DAYS * DAY_MS - now) / DAY_MS);
+  return left > 0 ? left : null;
+}
+
 const dateTime = (t: number) =>
   new Date(t).toLocaleString("th-TH", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -15,9 +27,14 @@ export default function App() {
   const selected = chats.find((c) => c.id === selectedId) ?? null;
   // patient photo the nurse picked from the chat to attach to a new ATK result
   const [atkDraft, setAtkDraft] = useState<AtkDraft | null>(null);
+  const [view, setView] = useState<"chat" | "notes">("chat");
+  const now = useNow();
 
   useEffect(listenWebhook, []);
-  useEffect(() => setAtkDraft(null), [selectedId]);
+  useEffect(() => {
+    setAtkDraft(null);
+    setView("chat");
+  }, [selectedId]);
   useEffect(() => {
     if (selectedId) markRead(selectedId);
   }, [selectedId, selected?.messages.length]);
@@ -49,21 +66,31 @@ export default function App() {
               <span className="font-semibold">{c.patient?.name || c.name}</span>
               <span className="truncate text-sm text-gray-500">{preview(c.messages.at(-1))}</span>
             </span>
+            <QuarantineChip daysLeft={quarantineDaysLeft(c, now)} />
             {c.unread > 0 && <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs text-white">{c.unread}</span>}
           </button>
         ))}
       </aside>
-      <main className="flex h-screen flex-col">
-        {selected ? (
-          <ChatPanel chat={selected} onUseAsAtk={setAtkDraft} />
-        ) : (
-          <p className="m-auto p-4 text-center text-gray-400">เลือกแชทจากด้านซ้าย</p>
-        )}
-      </main>
-      {selected ? (
-        <AtkPanel chat={selected} draft={atkDraft} onDraftUsed={() => setAtkDraft(null)} />
+      {selected && view === "notes" ? (
+        <NotesPage chat={selected} onBack={() => setView("chat")} />
       ) : (
-        <aside className="border-l border-gray-200 bg-white" />
+        <>
+          <main className="flex h-screen flex-col">
+            {selected ? (
+              <ChatPanel chat={selected} onUseAsAtk={setAtkDraft} />
+            ) : (
+              <p className="m-auto p-4 text-center text-gray-400">เลือกแชทจากด้านซ้าย</p>
+            )}
+          </main>
+          {selected ? (
+            <aside className="flex flex-col gap-3 overflow-y-auto border-l border-gray-200 bg-white p-4">
+              <AtkPanel chat={selected} draft={atkDraft} onDraftUsed={() => setAtkDraft(null)} />
+              <NotesSection chat={selected} onSeeAll={() => setView("notes")} />
+            </aside>
+          ) : (
+            <aside className="border-l border-gray-200 bg-white" />
+          )}
+        </>
       )}
     </div>
   );
@@ -314,7 +341,7 @@ function AtkPanel({ chat, draft, onDraftUsed }: { chat: Chat; draft: AtkDraft | 
   }
 
   return (
-    <aside className="flex flex-col gap-3 overflow-y-auto border-l border-gray-200 bg-white p-4">
+    <section className="flex flex-col gap-3">
       <header className="flex items-center justify-between">
         <div>
           <span className="text-xs uppercase tracking-wide text-gray-400">ข้อมูลสุขภาพ</span>
@@ -395,7 +422,116 @@ function AtkPanel({ chat, draft, onDraftUsed }: { chat: Chat; draft: AtkDraft | 
           </article>
         ))
       )}
-    </aside>
+    </section>
+  );
+}
+
+// re-render once a minute so the quarantine countdown stays current
+function useNow() {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+function QuarantineChip({ daysLeft }: { daysLeft: number | null }) {
+  if (daysLeft == null) return null;
+  return (
+    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800" title="นับจากผล ATK บวกล่าสุด">
+      🏠 {daysLeft} วัน
+    </span>
+  );
+}
+
+const NOTES_PREVIEW = 3;
+
+function NoteForm({ chat }: { chat: Chat }) {
+  const [text, setText] = useState("");
+
+  function save(e: React.FormEvent) {
+    e.preventDefault();
+    const body = text.trim();
+    if (!body) return;
+    addNote(chat.id, { id: `note-${Date.now()}`, text: body, at: Date.now() });
+    setText("");
+  }
+
+  return (
+    <form className="flex flex-col gap-2" onSubmit={save}>
+      <textarea
+        className={field}
+        rows={2}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="เช่น ไข้ 38.5 ไอแห้ง ไม่หอบ"
+      />
+      <button type="submit" className="self-end rounded-md bg-[#06c755] px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50" disabled={!text.trim()}>
+        เพิ่มบันทึก
+      </button>
+    </form>
+  );
+}
+
+function NoteCard({ note }: { note: SymptomNote }) {
+  return (
+    <article className="flex flex-col gap-1 rounded-lg border border-gray-200 p-3">
+      <time className="text-xs text-gray-400">{dateTime(note.at)} น.</time>
+      <p className="whitespace-pre-wrap text-sm">{note.text}</p>
+    </article>
+  );
+}
+
+function NotesSection({ chat, onSeeAll }: { chat: Chat; onSeeAll: () => void }) {
+  const notes = chat.notes ?? [];
+  return (
+    <section className="flex flex-col gap-3 border-t border-gray-200 pt-4">
+      <header className="flex items-center justify-between">
+        <div>
+          <span className="text-xs uppercase tracking-wide text-gray-400">ติดตามอาการ</span>
+          <h2 className="text-base font-semibold">บันทึกอาการ</h2>
+        </div>
+        <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-sm text-gray-600">{notes.length}</span>
+      </header>
+      <NoteForm chat={chat} />
+      {notes.length === 0 ? (
+        <p className="text-center text-sm text-gray-400">ยังไม่มีบันทึกอาการ</p>
+      ) : (
+        notes.slice(0, NOTES_PREVIEW).map((n) => <NoteCard key={n.id} note={n} />)
+      )}
+      {notes.length > NOTES_PREVIEW && (
+        <button type="button" className="text-sm font-semibold text-[#06c755] hover:underline" onClick={onSeeAll}>
+          ดูทั้งหมด ({notes.length})
+        </button>
+      )}
+    </section>
+  );
+}
+
+function NotesPage({ chat, onBack }: { chat: Chat; onBack: () => void }) {
+  const notes = chat.notes ?? [];
+  return (
+    <main className="col-span-2 flex h-screen flex-col bg-white">
+      <header className="flex items-center gap-3 border-b border-gray-200 px-5 py-3.5">
+        <button type="button" className={ghost} onClick={onBack}>
+          ← กลับไปแชท
+        </button>
+        <div className="flex flex-col">
+          <strong>บันทึกอาการทั้งหมด · {chat.patient?.name || chat.name}</strong>
+          <small className="text-gray-400">{notes.length} รายการ</small>
+        </div>
+      </header>
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
+        <div className="max-w-2xl">
+          <NoteForm chat={chat} />
+        </div>
+        {notes.length === 0 && <p className="m-auto text-gray-400">ยังไม่มีบันทึกอาการ</p>}
+        <div className="flex max-w-2xl flex-col gap-3">
+          {notes.map((n) => <NoteCard key={n.id} note={n} />)}
+        </div>
+      </div>
+    </main>
   );
 }
 
