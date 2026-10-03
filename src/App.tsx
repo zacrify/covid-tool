@@ -28,7 +28,10 @@ export default function App() {
   // patient photo the nurse picked from the chat to attach to a new ATK result
   const [atkDraft, setAtkDraft] = useState<AtkDraft | null>(null);
   const [view, setView] = useState<"chat" | "notes">("chat");
-  const now = useNow();
+  // prototype only: let the nurse pretend it is another day to test the quarantine countdown
+  const [testDate, setTestDate] = useState<string | null>(null);
+  const realNow = useNow();
+  const now = testDate ? new Date(`${testDate}T12:00`).getTime() : realNow;
 
   useEffect(listenWebhook, []);
   useEffect(() => {
@@ -92,6 +95,7 @@ export default function App() {
           )}
         </>
       )}
+      <DateControl value={testDate} onChange={setTestDate} />
     </div>
   );
 }
@@ -442,6 +446,37 @@ function QuarantineChip({ daysLeft }: { daysLeft: number | null }) {
     <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800" title="นับจากผล ATK บวกล่าสุด">
       🏠 {daysLeft} วัน
     </span>
+  );
+}
+
+// Floating "droplet" at the bottom-right: pick a fake "today" to test date-based UI
+function DateControl({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const today = toDateTimeInput(Date.now()).slice(0, 10);
+  return (
+    <div className="fixed right-5 bottom-5 flex flex-col items-end gap-2">
+      {open && (
+        <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+          <span className="text-xs text-gray-500">วันนี้คือวันที่ (สำหรับทดสอบ)</span>
+          <input className={field} type="date" value={value ?? today} onChange={(e) => onChange(e.target.value || null)} autoFocus />
+          <button type="button" className={ghost} onClick={() => onChange(null)} disabled={!value}>
+            กลับเป็นวันจริง
+          </button>
+        </div>
+      )}
+      <button
+        type="button"
+        title="เปลี่ยนวันที่สำหรับทดสอบ"
+        className={cn(
+          "flex h-12 w-12 items-center justify-center rounded-full text-2xl shadow-lg",
+          value ? "bg-amber-400" : "bg-white",
+        )}
+        onClick={() => setOpen((v) => !v)}
+      >
+        💧
+      </button>
+      {value && !open && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">ทดสอบ: {value}</span>}
+    </div>
   );
 }
 
