@@ -76,7 +76,7 @@ export default function App() {
         ))}
       </aside>
       {selected && view === "notes" ? (
-        <NotesPage chat={selected} onBack={() => setView("chat")} />
+        <NotesPage chat={selected} now={now} onBack={() => setView("chat")} />
       ) : (
         <>
           <main className="flex h-screen flex-col">
@@ -88,8 +88,8 @@ export default function App() {
           </main>
           {selected ? (
             <aside className="flex flex-col gap-3 overflow-y-auto border-l border-gray-200 bg-white p-4">
-              <AtkPanel chat={selected} draft={atkDraft} onDraftUsed={() => setAtkDraft(null)} />
-              <NotesSection chat={selected} onSeeAll={() => setView("notes")} />
+              <AtkPanel chat={selected} now={now} draft={atkDraft} onDraftUsed={() => setAtkDraft(null)} />
+              <NotesSection chat={selected} now={now} onSeeAll={() => setView("notes")} />
             </aside>
           ) : (
             <aside className="border-l border-gray-200 bg-white" />
@@ -292,10 +292,10 @@ function AtkEvidenceButton({ used, onClick }: { used: boolean; onClick: () => vo
   );
 }
 
-function AtkPanel({ chat, draft, onDraftUsed }: { chat: Chat; draft: AtkDraft | null; onDraftUsed: () => void }) {
+function AtkPanel({ chat, now, draft, onDraftUsed }: { chat: Chat; now: number; draft: AtkDraft | null; onDraftUsed: () => void }) {
   const [editing, setEditing] = useState(false);
   const [result, setResult] = useState<AtkResult["result"]>("negative");
-  const [recordedAt, setRecordedAt] = useState(toDateTimeInput(Date.now()));
+  const [recordedAt, setRecordedAt] = useState(toDateTimeInput(now));
   const [imageUrl, setImageUrl] = useState<string | undefined>();
   const [imageName, setImageName] = useState<string | undefined>();
   const [imageError, setImageError] = useState<string | null>(null);
@@ -337,7 +337,7 @@ function AtkPanel({ chat, draft, onDraftUsed }: { chat: Chat; draft: AtkDraft | 
 
   function reset() {
     setEditing(false);
-    setRecordedAt(toDateTimeInput(Date.now()));
+    setRecordedAt(toDateTimeInput(now));
     setImageUrl(undefined);
     setImageName(undefined);
     setSourceMessageId(undefined);
@@ -490,14 +490,14 @@ function DateControl({ value, onChange }: { value: string | null; onChange: (v: 
 
 const NOTES_PREVIEW = 3;
 
-function NoteForm({ chat }: { chat: Chat }) {
+function NoteForm({ chat, now }: { chat: Chat; now: number }) {
   const [text, setText] = useState("");
 
   function save(e: React.FormEvent) {
     e.preventDefault();
     const body = text.trim();
     if (!body) return;
-    addNote(chat.id, { id: `note-${Date.now()}`, text: body, at: Date.now() });
+    addNote(chat.id, { id: `note-${Date.now()}`, text: body, at: now });
     setText("");
   }
 
@@ -526,7 +526,7 @@ function NoteCard({ note }: { note: SymptomNote }) {
   );
 }
 
-function NotesSection({ chat, onSeeAll }: { chat: Chat; onSeeAll: () => void }) {
+function NotesSection({ chat, now, onSeeAll }: { chat: Chat; now: number; onSeeAll: () => void }) {
   const notes = chat.notes ?? [];
   return (
     <section className="flex flex-col gap-3 border-t border-gray-200 pt-4">
@@ -537,7 +537,7 @@ function NotesSection({ chat, onSeeAll }: { chat: Chat; onSeeAll: () => void }) 
         </div>
         <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-sm text-gray-600">{notes.length}</span>
       </header>
-      <NoteForm chat={chat} />
+      <NoteForm chat={chat} now={now} />
       {notes.length === 0 ? (
         <p className="text-center text-sm text-gray-400">ยังไม่มีบันทึกอาการ</p>
       ) : (
@@ -552,7 +552,7 @@ function NotesSection({ chat, onSeeAll }: { chat: Chat; onSeeAll: () => void }) 
   );
 }
 
-function NotesPage({ chat, onBack }: { chat: Chat; onBack: () => void }) {
+function NotesPage({ chat, now, onBack }: { chat: Chat; now: number; onBack: () => void }) {
   const notes = chat.notes ?? [];
   return (
     <main className="col-span-2 flex h-screen flex-col bg-white">
@@ -567,7 +567,7 @@ function NotesPage({ chat, onBack }: { chat: Chat; onBack: () => void }) {
       </header>
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
         <div className="max-w-2xl">
-          <NoteForm chat={chat} />
+          <NoteForm chat={chat} now={now} />
         </div>
         {notes.length === 0 && <p className="m-auto text-gray-400">ยังไม่มีบันทึกอาการ</p>}
         <div className="flex max-w-2xl flex-col gap-3">
