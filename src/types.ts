@@ -22,8 +22,9 @@ export type Patient = {
 export type AtkResult = {
   id: string;
   result: "negative" | "positive";
-  imageUrl?: string; // data URL, kept in localStorage
+  imageUrl?: string; // data URL (uploaded) or /line/... content URL (picked from chat)
   imageName?: string;
+  sourceMessageId?: string; // set when the photo came from a patient message
   recordedAt: number;
 };
 

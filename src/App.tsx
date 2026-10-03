@@ -13,8 +13,11 @@ export default function App() {
   const chats = useChats();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = chats.find((c) => c.id === selectedId) ?? null;
+  // patient photo the nurse picked from the chat to attach to a new ATK result
+  const [atkDraft, setAtkDraft] = useState<AtkDraft | null>(null);
 
   useEffect(listenWebhook, []);
+  useEffect(() => setAtkDraft(null), [selectedId]);
   useEffect(() => {
     if (selectedId) markRead(selectedId);
   }, [selectedId, selected?.messages.length]);
@@ -51,9 +54,17 @@ export default function App() {
         ))}
       </aside>
       <main className="flex h-screen flex-col">
-        {selected ? <ChatPanel chat={selected} /> : <p className="m-auto p-4 text-center text-gray-400">เลือกแชทจากด้านซ้าย</p>}
+        {selected ? (
+          <ChatPanel chat={selected} onUseAsAtk={setAtkDraft} />
+        ) : (
+          <p className="m-auto p-4 text-center text-gray-400">เลือกแชทจากด้านซ้าย</p>
+        )}
       </main>
-      {selected ? <AtkPanel chat={selected} /> : <aside className="border-l border-gray-200 bg-white" />}
+      {selected ? (
+        <AtkPanel chat={selected} draft={atkDraft} onDraftUsed={() => setAtkDraft(null)} />
+      ) : (
+        <aside className="border-l border-gray-200 bg-white" />
+      )}
     </div>
   );
 }
@@ -64,7 +75,9 @@ function preview(m?: Message) {
   return `${m.from === "nurse" ? "คุณ: " : ""}${body}`;
 }
 
-function ChatPanel({ chat }: { chat: Chat }) {
+type AtkDraft = { messageId: string; imageUrl: string };
+
+function ChatPanel({ chat, onUseAsAtk }: { chat: Chat; onUseAsAtk: (d: AtkDraft) => void }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -124,6 +137,9 @@ function ChatPanel({ chat }: { chat: Chat }) {
             {chat.kind === "group" && m.from === "patient" && <span className="text-xs text-gray-500">{m.name}</span>}
             {m.type === "text" && <span>{m.text}</span>}
             {m.type === "image" && <img className="max-w-[260px] rounded-lg" src={m.contentUrl} alt="รูปจากผู้ป่วย" />}
+            {m.type === "image" && m.from === "patient" && m.contentUrl && (
+              <AtkEvidenceButton used={isAtkEvidence(chat, m.id)} onClick={() => onUseAsAtk({ messageId: m.id, imageUrl: m.contentUrl! })} />
+            )}
             {m.type === "file" && (
               <a className="underline" href={m.contentUrl} target="_blank" rel="noreferrer">
                 📎 {m.fileName}
@@ -233,14 +249,36 @@ function PatientForm({ chat, onDone }: { chat: Chat; onDone: () => void }) {
   );
 }
 
-function AtkPanel({ chat }: { chat: Chat }) {
+const isAtkEvidence = (chat: Chat, messageId: string) => (chat.atkResults ?? []).some((r) => r.sourceMessageId === messageId);
+
+function AtkEvidenceButton({ used, onClick }: { used: boolean; onClick: () => void }) {
+  if (used) return <span className="text-xs text-emerald-700">🧪 ใช้เป็นหลักฐาน ATK แล้ว</span>;
+  return (
+    <button type="button" className="self-start rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50" onClick={onClick}>
+      🧪 ใช้เป็นหลักฐาน ATK
+    </button>
+  );
+}
+
+function AtkPanel({ chat, draft, onDraftUsed }: { chat: Chat; draft: AtkDraft | null; onDraftUsed: () => void }) {
   const [editing, setEditing] = useState(false);
   const [result, setResult] = useState<AtkResult["result"]>("negative");
   const [recordedAt, setRecordedAt] = useState(toDateTimeInput(Date.now()));
   const [imageUrl, setImageUrl] = useState<string | undefined>();
   const [imageName, setImageName] = useState<string | undefined>();
   const [imageError, setImageError] = useState<string | null>(null);
+  const [sourceMessageId, setSourceMessageId] = useState<string | undefined>();
   const results = chat.atkResults ?? [];
+
+  // nurse clicked "use as ATK evidence" on a patient photo: open the form with it attached
+  useEffect(() => {
+    if (!draft) return;
+    setImageUrl(draft.imageUrl);
+    setImageName("รูปจากแชท");
+    setSourceMessageId(draft.messageId);
+    setImageError(null);
+    setEditing(true);
+  }, [draft]);
 
   function selectImage(file?: File) {
     if (!file) return;
@@ -250,6 +288,7 @@ function AtkPanel({ chat }: { chat: Chat }) {
     reader.onload = () => {
       setImageUrl(String(reader.result));
       setImageName(file.name);
+      setSourceMessageId(undefined);
       setImageError(null);
     };
     reader.onerror = () => setImageError("อ่านไฟล์รูปไม่สำเร็จ กรุณาลองใหม่");
@@ -260,12 +299,18 @@ function AtkPanel({ chat }: { chat: Chat }) {
     e.preventDefault();
     const timestamp = new Date(recordedAt).getTime();
     if (!Number.isFinite(timestamp)) return;
-    addAtkResult(chat.id, { id: `atk-${Date.now()}`, result, recordedAt: timestamp, imageUrl, imageName });
+    addAtkResult(chat.id, { id: `atk-${Date.now()}`, result, recordedAt: timestamp, imageUrl, imageName, sourceMessageId });
+    reset();
+  }
+
+  function reset() {
     setEditing(false);
     setRecordedAt(toDateTimeInput(Date.now()));
     setImageUrl(undefined);
     setImageName(undefined);
+    setSourceMessageId(undefined);
     setImageError(null);
+    onDraftUsed();
   }
 
   return (
@@ -284,7 +329,7 @@ function AtkPanel({ chat }: { chat: Chat }) {
           "rounded-md border px-3 py-2 text-sm font-semibold",
           editing ? "border-gray-300 text-gray-500 hover:bg-gray-50" : "border-[#06c755] bg-[#06c755] text-white",
         )}
-        onClick={() => setEditing((v) => !v)}
+        onClick={() => (editing ? reset() : setEditing(true))}
       >
         {editing ? "ปิดฟอร์ม" : "+ บันทึกผล ATK"}
       </button>
@@ -307,6 +352,7 @@ function AtkPanel({ chat }: { chat: Chat }) {
             <input className="mt-1 block w-full text-sm" type="file" accept="image/*" onChange={(e) => selectImage(e.target.files?.[0])} />
           </label>
           {imageUrl && <img className="max-h-40 rounded-md border border-gray-200 object-contain" src={imageUrl} alt="ตัวอย่างรูปผลตรวจ ATK" />}
+          {sourceMessageId && <span className="text-xs text-emerald-700">📎 รูปจากแชทของผู้ป่วย</span>}
           {imageError && <span className="text-xs text-red-600">{imageError}</span>}
           <button type="submit" className="rounded-md bg-[#06c755] px-4 py-1.5 text-sm font-semibold text-white">
             บันทึกผลตรวจ
@@ -338,6 +384,7 @@ function AtkPanel({ chat }: { chat: Chat }) {
                 <strong>{item.result === "negative" ? "ไม่พบเชื้อ" : "พบเชื้อ"}</strong>
               </div>
             </div>
+            {item.sourceMessageId && <small className="text-xs text-gray-500">📎 รูปจากแชทของผู้ป่วย</small>}
             <div className="flex items-center gap-2 text-gray-500">
               <span>◷</span>
               <div className="flex flex-col leading-tight">
