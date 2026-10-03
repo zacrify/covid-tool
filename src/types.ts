@@ -16,7 +16,17 @@ export type Patient = {
   name: string;
   gender?: Gender;
   age?: number;
-  address: string;
+  district?: string; // อำเภอ (Phuket only, see src/phuket.ts)
+  subdistrict?: string; // ตำบล, used by the dashboard map
+  address: string; // house number, moo, etc.
+};
+
+// One quarantine round. Started by a positive ATK result (or imported from seed data).
+export type Quarantine = {
+  id: string;
+  from: number;
+  to: number;
+  atkResultId?: string;
 };
 
 export type AtkResult = {
@@ -43,6 +53,7 @@ export type Chat = {
   unread: number;
   patient?: Patient;
   atkResults?: AtkResult[];
+  quarantines?: Quarantine[];
   notes?: SymptomNote[];
 };
 

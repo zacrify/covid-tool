@@ -2,22 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { pushFile, pushText } from "./line";
 import { buildSummaryPrompt, elementToPdf, summarize, uploadFile } from "./referral";
-import { addAtkResult, addMessage, addNote, clearAll, markRead, setPatient, useChats } from "./store";
+import { Dashboard } from "./Dashboard";
+import { PHUKET, DISTRICTS } from "./phuket";
+import { addAtkResult, addMessage, addNote, clearAll, DAY_MS, latestQuarantine, markRead, setPatient, useChats } from "./store";
 import type { AtkResult, Chat, Gender, Message, Patient, SymptomNote } from "./types";
 import { listenWebhook } from "./webhook";
 
 const time = (t: number) => new Date(t).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
-const QUARANTINE_DAYS = 14;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-// Days of quarantine left, counted from the latest positive ATK result.
-// null = never had a positive result. 0 = finished quarantine (stays 0 until the next positive result).
+// Days left in the latest quarantine round.
+// null = never quarantined. 0 = finished (stays 0 until the next positive ATK starts a new round).
 function quarantineDaysLeft(chat: Chat, now: number): number | null {
-  const positive = (chat.atkResults ?? []).filter((r) => r.result === "positive");
-  if (positive.length === 0) return null;
-  const start = Math.max(...positive.map((r) => r.recordedAt));
-  const left = Math.ceil((start + QUARANTINE_DAYS * DAY_MS - now) / DAY_MS);
-  return Math.max(0, left);
+  const q = latestQuarantine(chat);
+  return q ? Math.max(0, Math.ceil((q.to - now) / DAY_MS)) : null;
 }
 
 const dateTime = (t: number) =>
@@ -29,7 +25,7 @@ export default function App() {
   const selected = chats.find((c) => c.id === selectedId) ?? null;
   // patient photo the nurse picked from the chat to attach to a new ATK result
   const [atkDraft, setAtkDraft] = useState<AtkDraft | null>(null);
-  const [view, setView] = useState<"chat" | "notes" | "referral">("chat");
+  const [view, setView] = useState<"chat" | "notes" | "referral" | "dashboard">("chat");
   // prototype only: let the nurse pretend it is another day to test the quarantine countdown
   const [testDate, setTestDate] = useState<string | null>(null);
   const realNow = useNow();
@@ -44,17 +40,42 @@ export default function App() {
     if (selectedId) markRead(selectedId);
   }, [selectedId, selected?.messages.length]);
 
+  if (view === "dashboard") {
+    return (
+      <div className="text-gray-800">
+        <Dashboard
+          now={now}
+          onBack={() => setView("chat")}
+          onOpenChat={(id) => {
+            setSelectedId(id);
+            setView("chat");
+          }}
+        />
+        <DateControl value={testDate} onChange={setTestDate} />
+      </div>
+    );
+  }
+
   return (
     <div className="grid h-screen grid-cols-[300px_minmax(360px,1fr)_320px] bg-gray-100 text-gray-800">
       <aside className="flex flex-col overflow-y-auto border-r border-gray-200 bg-white">
-        <header className="flex items-center justify-between border-b border-gray-200 px-4 py-3.5">
+        <header className="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-3.5">
           <h1 className="text-base font-semibold">COVID LINE OA</h1>
-          <button
-            className="rounded-md border border-gray-300 px-2.5 py-1 text-sm text-gray-500 hover:bg-gray-50"
-            onClick={() => confirm("ล้างแชททั้งหมด?") && clearAll()}
-          >
-            ล้าง
-          </button>
+          <span className="flex gap-1.5">
+            <button
+              className="rounded-md border border-gray-300 px-2.5 py-1 text-sm text-gray-500 hover:bg-gray-50"
+              title="แผนที่ผู้กักตัว"
+              onClick={() => setView("dashboard")}
+            >
+              🗺️ แผนที่
+            </button>
+            <button
+              className="rounded-md border border-gray-300 px-2.5 py-1 text-sm text-gray-500 hover:bg-gray-50"
+              onClick={() => confirm("ล้างแชททั้งหมด?") && clearAll()}
+            >
+              ล้าง
+            </button>
+          </span>
         </header>
         {chats.length === 0 && <p className="m-auto p-4 text-center text-gray-400">ยังไม่มีแชท ส่งข้อความจาก LINE simulator ก่อน</p>}
         {chats.map((c) => (
@@ -218,6 +239,7 @@ function PatientSummary({ patient }: { patient: Patient }) {
   const parts = [
     patient.gender && GENDER_LABEL[patient.gender],
     patient.age != null && `${patient.age} ปี`,
+    (patient.subdistrict || patient.district) && `ต.${patient.subdistrict ?? "-"} อ.${patient.district ?? "-"}`,
     patient.address && `ที่อยู่: ${patient.address}`,
   ].filter(Boolean);
   return <p className="text-sm text-gray-600">{parts.join(" · ") || "ยังไม่มีรายละเอียด"}</p>;
@@ -231,6 +253,8 @@ function PatientForm({ chat, onDone }: { chat: Chat; onDone: () => void }) {
   const [name, setName] = useState(p?.name ?? chat.name);
   const [gender, setGender] = useState<Gender | "">(p?.gender ?? "");
   const [age, setAge] = useState(p?.age != null ? String(p.age) : "");
+  const [district, setDistrict] = useState(p?.district ?? "");
+  const [subdistrict, setSubdistrict] = useState(p?.subdistrict ?? "");
   const [address, setAddress] = useState(p?.address ?? "");
 
   function save(e: React.FormEvent) {
@@ -240,6 +264,8 @@ function PatientForm({ chat, onDone }: { chat: Chat; onDone: () => void }) {
       name: name.trim() || chat.name,
       gender: gender || undefined,
       age: ageNum != null && Number.isFinite(ageNum) ? ageNum : undefined,
+      district: district || undefined,
+      subdistrict: subdistrict || undefined,
       address: address.trim(),
     });
     onDone();
@@ -264,9 +290,23 @@ function PatientForm({ chat, onDone }: { chat: Chat; onDone: () => void }) {
         อายุ
         <input className={field} type="number" min={0} max={150} value={age} onChange={(e) => setAge(e.target.value)} placeholder="ปี" />
       </label>
+      <label className="text-xs text-gray-500">
+        อำเภอ (ภูเก็ต)
+        <select className={field} value={district} onChange={(e) => { setDistrict(e.target.value); setSubdistrict(""); }}>
+          <option value="">ไม่ระบุ</option>
+          {DISTRICTS.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+      </label>
+      <label className="col-span-2 text-xs text-gray-500">
+        ตำบล
+        <select className={field} value={subdistrict} onChange={(e) => setSubdistrict(e.target.value)} disabled={!district}>
+          <option value="">ไม่ระบุ</option>
+          {(PHUKET[district] ?? []).map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </label>
       <label className="col-span-3 text-xs text-gray-500">
-        ที่อยู่
-        <textarea className={field} rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="บ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัด" />
+        ที่อยู่ (บ้านเลขที่ หมู่ ถนน)
+        <textarea className={field} rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="เช่น 12/3 หมู่ 5 ถ.เทพกระษัตรี" />
       </label>
       <div className="col-span-3 flex justify-end gap-2">
         {p && (
@@ -687,7 +727,7 @@ function ReferralPage({ chat, now, onDone }: { chat: Chat; now: number; onDone: 
               {[
                 ["ชื่อ-นามสกุล", p?.name || chat.name],
                 ["เพศ / อายุ", `${p?.gender ? GENDER_LABEL[p.gender] : "-"} / ${p?.age != null ? `${p.age} ปี` : "-"}`],
-                ["ที่อยู่", p?.address || "-"],
+                ["ที่อยู่", [p?.address, p?.subdistrict && `ต.${p.subdistrict}`, p?.district && `อ.${p.district}`, (p?.subdistrict || p?.district) && "จ.ภูเก็ต"].filter(Boolean).join(" ") || "-"],
                 ["LINE", `${chat.name} (${chat.id})`],
               ].map(([k, v]) => (
                 <tr key={k}>

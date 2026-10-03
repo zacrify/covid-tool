@@ -52,3 +52,6 @@ Component ที่มี: Badge, Button, Card, Checkbox, Dialog, Input, Label, 
 - `vite.config.ts` มี plugin เล็ก ๆ รับ `POST /api/line/webhook` (เช็ค `x-line-signature`) แล้วส่งต่อให้หน้าเว็บผ่าน SSE ที่ `/api/events`
 - หน้าเว็บเรียก LINE API ผ่าน proxy `/line/*` → `LINE_API_BASE`
 - ข้อมูลแชททั้งหมดอยู่ใน `localStorage` key `covid-tool.chats`
+- ผล ATK บวกจะสร้างรอบกักตัว 14 วัน (`chat.quarantines[]` มี `from`/`to`) ใช้ทั้ง chip ในรายการแชทและแผนที่
+- ปุ่ม "🗺️ แผนที่" เปิด dashboard ผู้กักตัวตามตำบลในภูเก็ต (รูปร่างตำบลอยู่ใน `public/phuket-subdistricts.json`)
+- ปุ่ม "โหลดข้อมูลตัวอย่าง" ใน dashboard อ่าน `public/seed-patients.csv` ลง localStorage (1 แถว = 1 รอบกักตัว ห้ามมี comma ในช่อง)

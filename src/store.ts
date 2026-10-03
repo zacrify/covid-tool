@@ -1,9 +1,26 @@
 import { useSyncExternalStore } from "react";
-import type { AtkResult, Chat, Message, Patient, SymptomNote } from "./types";
+import type { AtkResult, Chat, Message, Patient, Quarantine, SymptomNote } from "./types";
 
 // ฐานข้อมูล = localStorage อย่างเดียว (prototype)
 const KEY = "covid-tool.chats";
-let chats: Chat[] = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+export const QUARANTINE_DAYS = 14;
+export const DAY_MS = 24 * 60 * 60 * 1000;
+
+const quarantineFor = (r: AtkResult): Quarantine => ({
+  id: `q-${r.id}`,
+  from: r.recordedAt,
+  to: r.recordedAt + QUARANTINE_DAYS * DAY_MS,
+  atkResultId: r.id,
+});
+
+// Older data had no quarantine records: derive them from positive ATK results once
+function migrate(chat: Chat): Chat {
+  if (chat.quarantines) return chat;
+  const positive = (chat.atkResults ?? []).filter((r) => r.result === "positive");
+  return { ...chat, quarantines: positive.map(quarantineFor) };
+}
+
+let chats: Chat[] = (JSON.parse(localStorage.getItem(KEY) ?? "[]") as Chat[]).map(migrate);
 const listeners = new Set<() => void>();
 
 function commit(next: Chat[]) {
@@ -40,8 +57,25 @@ export function setPatient(chatId: string, patient: Patient | undefined) {
   commit(chats.map((c) => (c.id === chatId ? { ...c, patient } : c)));
 }
 
+// A positive result starts a new quarantine round
 export function addAtkResult(chatId: string, result: AtkResult) {
-  commit(chats.map((c) => (c.id === chatId ? { ...c, atkResults: [result, ...(c.atkResults ?? [])] } : c)));
+  commit(chats.map((c) => c.id !== chatId ? c : {
+    ...c,
+    atkResults: [result, ...(c.atkResults ?? [])],
+    quarantines: result.result === "positive" ? [quarantineFor(result), ...(c.quarantines ?? [])] : c.quarantines,
+  }));
+}
+
+// Latest quarantine round, or null if the patient never had one
+export function latestQuarantine(chat: Chat): Quarantine | null {
+  const qs = chat.quarantines ?? [];
+  return qs.length ? qs.reduce((a, b) => (b.from > a.from ? b : a)) : null;
+}
+
+// Seed data: replace chats with the same id, keep the rest
+export function importChats(incoming: Chat[]) {
+  const ids = new Set(incoming.map((c) => c.id));
+  commit([...incoming, ...chats.filter((c) => !ids.has(c.id))]);
 }
 
 export function addNote(chatId: string, note: SymptomNote) {
