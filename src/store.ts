@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { Chat, Message } from "./types";
+import type { Chat, Message, Patient } from "./types";
 
 // ฐานข้อมูล = localStorage อย่างเดียว (prototype)
 const KEY = "covid-tool.chats";
@@ -27,12 +27,17 @@ export function addMessage(chat: Omit<Chat, "messages" | "unread">, msg: Message
   const existing = chats.find((c) => c.id === chat.id);
   if (existing?.messages.some((m) => m.id === msg.id)) return;
   const unread = (existing?.unread ?? 0) + (msg.from === "patient" ? 1 : 0);
-  const updated: Chat = { ...chat, unread, messages: [...(existing?.messages ?? []), msg] };
+  // spread existing first so the nurse-entered patient info survives new webhook messages
+  const updated: Chat = { ...existing, ...chat, unread, messages: [...(existing?.messages ?? []), msg] };
   commit([updated, ...chats.filter((c) => c.id !== chat.id)]);
 }
 
 export function markRead(chatId: string) {
   commit(chats.map((c) => (c.id === chatId ? { ...c, unread: 0 } : c)));
+}
+
+export function setPatient(chatId: string, patient: Patient | undefined) {
+  commit(chats.map((c) => (c.id === chatId ? { ...c, patient } : c)));
 }
 
 export function clearAll() {

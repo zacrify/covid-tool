@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { pushText } from "./line";
-import { addMessage, clearAll, markRead, useChats } from "./store";
-import type { Chat, Message } from "./types";
+import { addMessage, clearAll, markRead, setPatient, useChats } from "./store";
+import type { Chat, Gender, Message, Patient } from "./types";
 import { listenWebhook } from "./webhook";
 
 const time = (t: number) => new Date(t).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
@@ -41,7 +41,7 @@ export default function App() {
           >
             <span className="text-2xl">{c.kind === "group" ? "👥" : "🧑"}</span>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="font-semibold">{c.name}</span>
+              <span className="font-semibold">{c.patient?.name || c.name}</span>
               <span className="truncate text-sm text-gray-500">{preview(c.messages.at(-1))}</span>
             </span>
             {c.unread > 0 && <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs text-white">{c.unread}</span>}
@@ -65,6 +65,7 @@ function ChatPanel({ chat }: { chat: Chat }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [editing, setEditing] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -89,11 +90,24 @@ function ChatPanel({ chat }: { chat: Chat }) {
 
   return (
     <>
-      <header className="flex flex-col border-b border-gray-200 bg-white px-5 py-3.5">
-        <strong>{chat.name}</strong>
-        <small className="text-gray-400">
-          {chat.kind === "group" ? "กลุ่ม" : "แชทเดี่ยว"} · {chat.id}
-        </small>
+      <header className="flex flex-col gap-2 border-b border-gray-200 bg-white px-5 py-3.5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-col">
+            <strong>{chat.patient?.name || chat.name}</strong>
+            <small className="truncate text-gray-400">
+              {chat.kind === "group" ? "กลุ่ม" : "แชทเดี่ยว"} · LINE: {chat.name} · {chat.id}
+            </small>
+          </div>
+          <button
+            type="button"
+            className="shrink-0 rounded-md border border-gray-300 px-2.5 py-1 text-sm text-gray-500 hover:bg-gray-50"
+            onClick={() => setEditing((v) => !v)}
+          >
+            {editing ? "ปิด" : chat.patient ? "แก้ไขข้อมูลผู้ป่วย" : "เพิ่มข้อมูลผู้ป่วย"}
+          </button>
+        </div>
+        {!editing && chat.patient && <PatientSummary patient={chat.patient} />}
+        {editing && <PatientForm chat={chat} onDone={() => setEditing(false)} />}
       </header>
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-5 py-4">
         {chat.messages.map((m) => (
@@ -140,5 +154,78 @@ function ChatPanel({ chat }: { chat: Chat }) {
       </form>
       {error && <p className="px-5 pb-3 text-sm text-red-600">{error}</p>}
     </>
+  );
+}
+
+const GENDER_LABEL: Record<Gender, string> = { male: "ชาย", female: "หญิง", other: "อื่น ๆ" };
+
+function PatientSummary({ patient }: { patient: Patient }) {
+  const parts = [
+    patient.gender && GENDER_LABEL[patient.gender],
+    patient.age != null && `${patient.age} ปี`,
+    patient.address && `ที่อยู่: ${patient.address}`,
+  ].filter(Boolean);
+  return <p className="text-sm text-gray-600">{parts.join(" · ") || "ยังไม่มีรายละเอียด"}</p>;
+}
+
+const field = "mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm outline-none focus:border-[#06c755]";
+const ghost = "rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50";
+
+function PatientForm({ chat, onDone }: { chat: Chat; onDone: () => void }) {
+  const p = chat.patient;
+  const [name, setName] = useState(p?.name ?? chat.name);
+  const [gender, setGender] = useState<Gender | "">(p?.gender ?? "");
+  const [age, setAge] = useState(p?.age != null ? String(p.age) : "");
+  const [address, setAddress] = useState(p?.address ?? "");
+
+  function save(e: React.FormEvent) {
+    e.preventDefault();
+    const ageNum = age.trim() === "" ? undefined : Number(age);
+    setPatient(chat.id, {
+      name: name.trim() || chat.name,
+      gender: gender || undefined,
+      age: ageNum != null && Number.isFinite(ageNum) ? ageNum : undefined,
+      address: address.trim(),
+    });
+    onDone();
+  }
+
+  return (
+    <form className="grid grid-cols-[2fr_1fr_1fr] gap-x-3 gap-y-2 rounded-lg bg-gray-50 p-3" onSubmit={save}>
+      <label className="text-xs text-gray-500">
+        ชื่อ-นามสกุล
+        <input className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อผู้ป่วย" autoFocus />
+      </label>
+      <label className="text-xs text-gray-500">
+        เพศ
+        <select className={field} value={gender} onChange={(e) => setGender(e.target.value as Gender | "")}>
+          <option value="">ไม่ระบุ</option>
+          <option value="male">ชาย</option>
+          <option value="female">หญิง</option>
+          <option value="other">อื่น ๆ</option>
+        </select>
+      </label>
+      <label className="text-xs text-gray-500">
+        อายุ
+        <input className={field} type="number" min={0} max={150} value={age} onChange={(e) => setAge(e.target.value)} placeholder="ปี" />
+      </label>
+      <label className="col-span-3 text-xs text-gray-500">
+        ที่อยู่
+        <textarea className={field} rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="บ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัด" />
+      </label>
+      <div className="col-span-3 flex justify-end gap-2">
+        {p && (
+          <button type="button" className={cn(ghost, "mr-auto text-red-600")} onClick={() => confirm("ลบข้อมูลผู้ป่วย?") && (setPatient(chat.id, undefined), onDone())}>
+            ลบข้อมูล
+          </button>
+        )}
+        <button type="button" className={ghost} onClick={onDone}>
+          ยกเลิก
+        </button>
+        <button type="submit" className="rounded-md bg-[#06c755] px-4 py-1.5 text-sm font-semibold text-white">
+          บันทึก
+        </button>
+      </div>
+    </form>
   );
 }
