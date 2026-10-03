@@ -9,13 +9,14 @@ const time = (t: number) => new Date(t).toLocaleTimeString("th-TH", { hour: "2-d
 const QUARANTINE_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Days of quarantine left, counted from the latest positive ATK result. null = not in quarantine.
+// Days of quarantine left, counted from the latest positive ATK result.
+// null = never had a positive result. 0 = finished quarantine (stays 0 until the next positive result).
 function quarantineDaysLeft(chat: Chat, now: number): number | null {
   const positive = (chat.atkResults ?? []).filter((r) => r.result === "positive");
   if (positive.length === 0) return null;
   const start = Math.max(...positive.map((r) => r.recordedAt));
   const left = Math.ceil((start + QUARANTINE_DAYS * DAY_MS - now) / DAY_MS);
-  return left > 0 ? left : null;
+  return Math.max(0, left);
 }
 
 const dateTime = (t: number) =>
@@ -442,9 +443,16 @@ function useNow() {
 
 function QuarantineChip({ daysLeft }: { daysLeft: number | null }) {
   if (daysLeft == null) return null;
+  const done = daysLeft === 0;
   return (
-    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800" title="นับจากผล ATK บวกล่าสุด">
-      🏠 {daysLeft} วัน
+    <span
+      className={cn(
+        "shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold",
+        done ? "bg-gray-200 text-gray-600" : "bg-amber-100 text-amber-800",
+      )}
+      title={done ? "กักตัวครบแล้ว รอผล ATK บวกครั้งถัดไปจึงเริ่มรอบใหม่" : "นับจากผล ATK บวกล่าสุด"}
+    >
+      {done ? "✓" : "🏠"} {daysLeft} วัน
     </span>
   );
 }
