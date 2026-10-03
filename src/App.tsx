@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { pushText } from "./line";
+import { pushFile, pushText } from "./line";
+import { buildSummaryPrompt, elementToPdf, summarize, uploadFile } from "./referral";
 import { addAtkResult, addMessage, addNote, clearAll, markRead, setPatient, useChats } from "./store";
 import type { AtkResult, Chat, Gender, Message, Patient, SymptomNote } from "./types";
 import { listenWebhook } from "./webhook";
@@ -28,7 +29,7 @@ export default function App() {
   const selected = chats.find((c) => c.id === selectedId) ?? null;
   // patient photo the nurse picked from the chat to attach to a new ATK result
   const [atkDraft, setAtkDraft] = useState<AtkDraft | null>(null);
-  const [view, setView] = useState<"chat" | "notes">("chat");
+  const [view, setView] = useState<"chat" | "notes" | "referral">("chat");
   // prototype only: let the nurse pretend it is another day to test the quarantine countdown
   const [testDate, setTestDate] = useState<string | null>(null);
   const realNow = useNow();
@@ -77,6 +78,8 @@ export default function App() {
       </aside>
       {selected && view === "notes" ? (
         <NotesPage chat={selected} now={now} onBack={() => setView("chat")} />
+      ) : selected && view === "referral" ? (
+        <ReferralPage chat={selected} now={now} onDone={() => setView("chat")} />
       ) : (
         <>
           <main className="flex h-screen flex-col">
@@ -90,6 +93,7 @@ export default function App() {
             <aside className="flex flex-col gap-3 overflow-y-auto border-l border-gray-200 bg-white p-4">
               <AtkPanel chat={selected} now={now} draft={atkDraft} onDraftUsed={() => setAtkDraft(null)} />
               <NotesSection chat={selected} now={now} onSeeAll={() => setView("notes")} />
+              <ReferralSection onCreate={() => setView("referral")} />
             </aside>
           ) : (
             <aside className="border-l border-gray-200 bg-white" />
@@ -572,6 +576,162 @@ function NotesPage({ chat, now, onBack }: { chat: Chat; now: number; onBack: () 
         {notes.length === 0 && <p className="m-auto text-gray-400">ยังไม่มีบันทึกอาการ</p>}
         <div className="flex max-w-2xl flex-col gap-3">
           {notes.map((n) => <NoteCard key={n.id} note={n} />)}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function ReferralSection({ onCreate }: { onCreate: () => void }) {
+  return (
+    <section className="flex flex-col gap-3 border-t border-gray-200 pt-4">
+      <header>
+        <span className="text-xs uppercase tracking-wide text-gray-400">อาการรุนแรง</span>
+        <h2 className="text-base font-semibold">ส่งต่อโรงพยาบาล</h2>
+      </header>
+      <button type="button" className="rounded-md border border-red-600 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50" onClick={onCreate}>
+        🏥 สร้างใบส่งตัว
+      </button>
+    </section>
+  );
+}
+
+const dateOnly = (t: number) => new Date(t).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" });
+
+function ReferralPage({ chat, now, onDone }: { chat: Chat; now: number; onDone: () => void }) {
+  const [hospital, setHospital] = useState("");
+  const [reason, setReason] = useState("");
+  const [summary, setSummary] = useState("");
+  const [busy, setBusy] = useState<"ai" | "pdf" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const letter = useRef<HTMLDivElement>(null);
+  const p = chat.patient;
+  const atk = [...(chat.atkResults ?? [])].sort((a, b) => a.recordedAt - b.recordedAt);
+  const notes = [...(chat.notes ?? [])].sort((a, b) => a.at - b.at);
+
+  async function runAi() {
+    setBusy("ai");
+    setError(null);
+    try {
+      setSummary(await summarize(buildSummaryPrompt(chat)));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendPdf() {
+    if (!letter.current) return;
+    setBusy("pdf");
+    setError(null);
+    try {
+      const url = await uploadFile(await elementToPdf(letter.current));
+      const fileName = `ใบส่งตัว-${p?.name || chat.name}.pdf`;
+      await pushFile(chat.id, fileName, `${location.origin}${url}`);
+      addMessage(chat, { id: `nurse-${Date.now()}`, from: "nurse", name: "พยาบาล", type: "file", fileName, contentUrl: url, at: now });
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <main className="col-span-2 grid h-screen grid-cols-[360px_1fr] overflow-hidden bg-gray-100">
+      <aside className="flex flex-col gap-3 overflow-y-auto border-r border-gray-200 bg-white p-4">
+        <header className="flex items-center gap-3">
+          <button type="button" className={ghost} onClick={onDone}>
+            ← กลับ
+          </button>
+          <strong>ใบส่งตัว · {p?.name || chat.name}</strong>
+        </header>
+        <label className="text-xs text-gray-500">
+          โรงพยาบาลปลายทาง
+          <input className={field} value={hospital} onChange={(e) => setHospital(e.target.value)} placeholder="เช่น โรงพยาบาลราชวิถี" autoFocus />
+        </label>
+        <label className="text-xs text-gray-500">
+          เหตุผลที่ส่งต่อ
+          <textarea className={field} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="เช่น หายใจหอบ ออกซิเจนปลายนิ้ว 93%" />
+        </label>
+        <label className="text-xs text-gray-500">
+          สรุปอาการ (AI ร่างให้ แก้ได้)
+          <textarea className={field} rows={7} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="กด “สรุปด้วย AI” หรือพิมพ์เอง" />
+        </label>
+        <button type="button" className={cn(ghost, "disabled:opacity-50")} onClick={runAi} disabled={busy != null}>
+          {busy === "ai" ? "กำลังสรุป…" : "✨ สรุปด้วย AI"}
+        </button>
+        <button
+          type="button"
+          className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          onClick={sendPdf}
+          disabled={busy != null || !hospital.trim()}
+        >
+          {busy === "pdf" ? "กำลังสร้าง PDF…" : "สร้าง PDF และส่งให้ผู้ป่วย"}
+        </button>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </aside>
+
+      <div className="overflow-y-auto p-6">
+        {/* The letter: plain inline styles so it renders the same in the PDF */}
+        <div ref={letter} style={{ width: 794, margin: "0 auto", padding: 56, background: "#fff", color: "#111", fontSize: 15, lineHeight: 1.6 }}>
+          <h1 style={{ fontSize: 24, margin: 0, textAlign: "center" }}>ใบส่งตัวผู้ป่วย</h1>
+          <p style={{ textAlign: "center", margin: "4px 0 24px", color: "#555" }}>ระบบติดตามผู้ป่วย COVID-19 ผ่าน LINE OA</p>
+          <p style={{ margin: 0 }}>วันที่ {dateOnly(now)}</p>
+          <p style={{ margin: "0 0 16px" }}>เรียน แพทย์เวร {hospital || "________________"}</p>
+
+          <h2 style={{ fontSize: 17, margin: "16px 0 4px" }}>ข้อมูลผู้ป่วย</h2>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <tbody>
+              {[
+                ["ชื่อ-นามสกุล", p?.name || chat.name],
+                ["เพศ / อายุ", `${p?.gender ? GENDER_LABEL[p.gender] : "-"} / ${p?.age != null ? `${p.age} ปี` : "-"}`],
+                ["ที่อยู่", p?.address || "-"],
+                ["LINE", `${chat.name} (${chat.id})`],
+              ].map(([k, v]) => (
+                <tr key={k}>
+                  <td style={{ padding: "2px 8px 2px 0", color: "#555", width: 130, verticalAlign: "top" }}>{k}</td>
+                  <td style={{ padding: "2px 0" }}>{v}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h2 style={{ fontSize: 17, margin: "16px 0 4px" }}>ผลตรวจ ATK</h2>
+          {atk.length === 0 ? (
+            <p style={{ margin: 0 }}>ไม่มีผลตรวจ</p>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {atk.map((r) => (
+                <li key={r.id}>
+                  {dateTime(r.recordedAt)} น. — <strong style={{ color: r.result === "positive" ? "#b91c1c" : "#047857" }}>{r.result === "positive" ? "พบเชื้อ" : "ไม่พบเชื้อ"}</strong>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <h2 style={{ fontSize: 17, margin: "16px 0 4px" }}>บันทึกอาการ</h2>
+          {notes.length === 0 ? (
+            <p style={{ margin: 0 }}>ไม่มีบันทึก</p>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {notes.map((n) => (
+                <li key={n.id}>
+                  {dateTime(n.at)} น. — {n.text}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <h2 style={{ fontSize: 17, margin: "16px 0 4px" }}>สรุปอาการ</h2>
+          <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{summary || "(ยังไม่มีสรุป)"}</p>
+
+          <h2 style={{ fontSize: 17, margin: "16px 0 4px" }}>เหตุผลที่ส่งต่อ</h2>
+          <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{reason || "(ยังไม่ระบุ)"}</p>
+
+          <p style={{ margin: "40px 0 0" }}>ลงชื่อ ______________________ พยาบาลผู้ดูแล</p>
+          <p style={{ margin: 0, color: "#555", fontSize: 13 }}>เอกสารนี้สร้างจากระบบต้นแบบ ใช้เพื่อการสาธิตเท่านั้น</p>
         </div>
       </div>
     </main>

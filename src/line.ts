@@ -26,3 +26,14 @@ export async function pushText(to: string, text: string): Promise<void> {
 }
 
 export const contentUrl = (messageId: string) => `/line/v2/bot/message/${messageId}/content`;
+
+// Prototype: line-sim renders a non-image media message as a download link.
+// Real LINE bots cannot push arbitrary files; use a public URL in a text message there.
+export async function pushFile(to: string, fileName: string, url: string): Promise<void> {
+  const r = await fetch("/line/v2/bot/message/push", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ to, messages: [{ type: "file", text: fileName, originalContentUrl: url }] }),
+  });
+  if (!r.ok) throw new Error(`push failed: ${r.status} ${await r.text()}`);
+}

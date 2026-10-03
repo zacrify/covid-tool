@@ -47,10 +47,65 @@ function lineWebhook(secret: string): Plugin {
   };
 }
 
+// Prototype helpers that need a server: hold generated files in memory and call Gemini with the server-side key.
+function prototypeApi(geminiKey: string): Plugin {
+  const files = new Map<string, { type: string; bytes: Buffer }>();
+  return {
+    name: "prototype-api",
+    configureServer(server) {
+      // POST raw bytes → { url } ; GET /api/files/<id> → the bytes. Gone on restart.
+      server.middlewares.use("/api/files", async (req, res) => {
+        if (req.method === "POST") {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(chunk);
+          const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          files.set(id, { type: req.headers["content-type"] ?? "application/octet-stream", bytes: Buffer.concat(chunks) });
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify({ url: `/api/files/${id}` }));
+        }
+        const file = files.get((req.url ?? "").slice(1).split("?")[0]);
+        if (!file) {
+          res.statusCode = 404;
+          return res.end();
+        }
+        res.setHeader("Content-Type", file.type);
+        res.end(file.bytes);
+      });
+      // POST { prompt } → { text } via Gemini. Key stays on the server.
+      server.middlewares.use("/api/ai/summary", async (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          return res.end();
+        }
+        if (!geminiKey) {
+          res.statusCode = 500;
+          return res.end("GEMINI_API_KEY is not set in .env");
+        }
+        let raw = "";
+        for await (const chunk of req) raw += chunk;
+        const { prompt } = JSON.parse(raw) as { prompt: string };
+        const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        });
+        if (!r.ok) {
+          res.statusCode = 502;
+          return res.end(`Gemini ${r.status}: ${await r.text()}`);
+        }
+        const data = (await r.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+        const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ text }));
+      });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
-    plugins: [react(), tailwindcss(), lineWebhook(env.CHANNEL_SECRET ?? "")],
+    plugins: [react(), tailwindcss(), lineWebhook(env.CHANNEL_SECRET ?? ""), prototypeApi(env.GEMINI_API_KEY ?? "")],
     resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
     server: {
       port: Number(env.PORT ?? 3000),
