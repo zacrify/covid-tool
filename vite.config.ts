@@ -1,6 +1,8 @@
 import { createHmac } from "node:crypto";
 import type { ServerResponse } from "node:http";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 
 // รับ webhook จาก LINE (หรือ line-sim) แล้วส่งต่อให้หน้าเว็บผ่าน SSE ที่ /api/events
@@ -48,7 +50,8 @@ function lineWebhook(secret: string): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
-    plugins: [react(), lineWebhook(env.CHANNEL_SECRET ?? "")],
+    plugins: [react(), tailwindcss(), lineWebhook(env.CHANNEL_SECRET ?? "")],
+    resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
     server: {
       port: Number(env.PORT ?? 3000),
       // หน้าเว็บเรียก /line/... แล้ว vite ส่งต่อไป LINE API (line-sim) ให้ ไม่ติด CORS
