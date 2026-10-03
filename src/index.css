@@ -1,6 +1,2 @@
-@import "tailwindcss";
-
-/* ตอนจะเปลี่ยนไปใช้ retro-ui ให้แทนบรรทัดบนด้วย:
-   @import "@ai-course/retro-ui/styles.css";
-   @source "../node_modules/@ai-course/retro-ui/dist";
-*/
+@import "@ai-course/retro-ui/styles.css";
+@source "../node_modules/@ai-course/retro-ui/dist";
