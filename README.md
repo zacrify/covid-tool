@@ -7,7 +7,7 @@
 ```bash
 cp .env.example .env   # CHANNEL_SECRET ต้องตรงกับของ line-sim
 pnpm install
-pnpm dev               # http://localhost:3000
+pnpm start             # http://localhost:3000
 ```
 
 แล้วรัน line-sim อีกหน้าต่าง (`WEBHOOK_URL=http://localhost:3000/api/line/webhook`):
