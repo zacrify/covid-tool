@@ -19,6 +19,14 @@ export type Patient = {
   address: string;
 };
 
+export type AtkResult = {
+  id: string;
+  result: "negative" | "positive";
+  imageUrl?: string; // data URL, kept in localStorage
+  imageName?: string;
+  recordedAt: number;
+};
+
 export type Chat = {
   id: string; // userId หรือ groupId
   kind: "user" | "group";
@@ -26,6 +34,7 @@ export type Chat = {
   messages: Message[];
   unread: number;
   patient?: Patient;
+  atkResults?: AtkResult[];
 };
 
 // รูปแบบ event ที่ LINE ส่งมา (เฉพาะส่วนที่ใช้)

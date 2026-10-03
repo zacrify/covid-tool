@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { pushText } from "./line";
-import { addMessage, clearAll, markRead, setPatient, useChats } from "./store";
-import type { Chat, Gender, Message, Patient } from "./types";
+import { addAtkResult, addMessage, clearAll, markRead, setPatient, useChats } from "./store";
+import type { AtkResult, Chat, Gender, Message, Patient } from "./types";
 import { listenWebhook } from "./webhook";
 
 const time = (t: number) => new Date(t).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+const dateTime = (t: number) =>
+  new Date(t).toLocaleString("th-TH", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 export default function App() {
   const chats = useChats();
@@ -18,7 +20,7 @@ export default function App() {
   }, [selectedId, selected?.messages.length]);
 
   return (
-    <div className="grid h-screen grid-cols-[300px_1fr] bg-gray-100 text-gray-800">
+    <div className="grid h-screen grid-cols-[300px_minmax(360px,1fr)_320px] bg-gray-100 text-gray-800">
       <aside className="flex flex-col overflow-y-auto border-r border-gray-200 bg-white">
         <header className="flex items-center justify-between border-b border-gray-200 px-4 py-3.5">
           <h1 className="text-base font-semibold">COVID LINE OA</h1>
@@ -51,6 +53,7 @@ export default function App() {
       <main className="flex h-screen flex-col">
         {selected ? <ChatPanel chat={selected} /> : <p className="m-auto p-4 text-center text-gray-400">เลือกแชทจากด้านซ้าย</p>}
       </main>
+      {selected ? <AtkPanel chat={selected} /> : <aside className="border-l border-gray-200 bg-white" />}
     </div>
   );
 }
@@ -228,4 +231,128 @@ function PatientForm({ chat, onDone }: { chat: Chat; onDone: () => void }) {
       </div>
     </form>
   );
+}
+
+function AtkPanel({ chat }: { chat: Chat }) {
+  const [editing, setEditing] = useState(false);
+  const [result, setResult] = useState<AtkResult["result"]>("negative");
+  const [recordedAt, setRecordedAt] = useState(toDateTimeInput(Date.now()));
+  const [imageUrl, setImageUrl] = useState<string | undefined>();
+  const [imageName, setImageName] = useState<string | undefined>();
+  const [imageError, setImageError] = useState<string | null>(null);
+  const results = chat.atkResults ?? [];
+
+  function selectImage(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return setImageError("กรุณาเลือกไฟล์รูปภาพเท่านั้น");
+    if (file.size > 2 * 1024 * 1024) return setImageError("รูปต้องมีขนาดไม่เกิน 2 MB");
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImageUrl(String(reader.result));
+      setImageName(file.name);
+      setImageError(null);
+    };
+    reader.onerror = () => setImageError("อ่านไฟล์รูปไม่สำเร็จ กรุณาลองใหม่");
+    reader.readAsDataURL(file);
+  }
+
+  function save(e: React.FormEvent) {
+    e.preventDefault();
+    const timestamp = new Date(recordedAt).getTime();
+    if (!Number.isFinite(timestamp)) return;
+    addAtkResult(chat.id, { id: `atk-${Date.now()}`, result, recordedAt: timestamp, imageUrl, imageName });
+    setEditing(false);
+    setRecordedAt(toDateTimeInput(Date.now()));
+    setImageUrl(undefined);
+    setImageName(undefined);
+    setImageError(null);
+  }
+
+  return (
+    <aside className="flex flex-col gap-3 overflow-y-auto border-l border-gray-200 bg-white p-4">
+      <header className="flex items-center justify-between">
+        <div>
+          <span className="text-xs uppercase tracking-wide text-gray-400">ข้อมูลสุขภาพ</span>
+          <h2 className="text-base font-semibold">ผลตรวจ ATK</h2>
+        </div>
+        <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-sm text-gray-600">{results.length}</span>
+      </header>
+
+      <button
+        type="button"
+        className={cn(
+          "rounded-md border px-3 py-2 text-sm font-semibold",
+          editing ? "border-gray-300 text-gray-500 hover:bg-gray-50" : "border-[#06c755] bg-[#06c755] text-white",
+        )}
+        onClick={() => setEditing((v) => !v)}
+      >
+        {editing ? "ปิดฟอร์ม" : "+ บันทึกผล ATK"}
+      </button>
+
+      {editing && (
+        <form className="flex flex-col gap-2 rounded-lg bg-gray-50 p-3" onSubmit={save}>
+          <label className="text-xs text-gray-500">
+            ผลตรวจ
+            <select className={field} value={result} onChange={(e) => setResult(e.target.value as AtkResult["result"])}>
+              <option value="negative">ไม่พบเชื้อ</option>
+              <option value="positive">พบเชื้อ</option>
+            </select>
+          </label>
+          <label className="text-xs text-gray-500">
+            วันและเวลาตรวจ
+            <input className={field} type="datetime-local" value={recordedAt} onChange={(e) => setRecordedAt(e.target.value)} required />
+          </label>
+          <label className="text-xs text-gray-500">
+            รูปผลตรวจ (ถ้ามี)
+            <input className="mt-1 block w-full text-sm" type="file" accept="image/*" onChange={(e) => selectImage(e.target.files?.[0])} />
+          </label>
+          {imageUrl && <img className="max-h-40 rounded-md border border-gray-200 object-contain" src={imageUrl} alt="ตัวอย่างรูปผลตรวจ ATK" />}
+          {imageError && <span className="text-xs text-red-600">{imageError}</span>}
+          <button type="submit" className="rounded-md bg-[#06c755] px-4 py-1.5 text-sm font-semibold text-white">
+            บันทึกผลตรวจ
+          </button>
+        </form>
+      )}
+
+      {results.length === 0 ? (
+        <div className="m-auto flex flex-col items-center gap-1 text-center text-gray-400">
+          <span className="text-3xl">🧪</span>
+          <strong className="text-gray-500">ยังไม่มีผลตรวจ</strong>
+          <small>บันทึกผล ATK ของผู้ป่วยได้ที่นี่</small>
+        </div>
+      ) : (
+        results.map((item) => (
+          <article key={item.id} className="flex flex-col gap-2 rounded-lg border border-gray-200 p-3">
+            {item.imageUrl && (
+              <img className="max-h-40 rounded-md object-contain" src={item.imageUrl} alt={`รูปผลตรวจ ATK${item.imageName ? ` ${item.imageName}` : ""}`} />
+            )}
+            <div
+              className={cn(
+                "flex items-center gap-2 rounded-md px-2.5 py-1.5",
+                item.result === "negative" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700",
+              )}
+            >
+              <span className="text-lg font-bold">{item.result === "negative" ? "✓" : "!"}</span>
+              <div className="flex flex-col leading-tight">
+                <small className="text-xs opacity-70">ผลตรวจ</small>
+                <strong>{item.result === "negative" ? "ไม่พบเชื้อ" : "พบเชื้อ"}</strong>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-gray-500">
+              <span>◷</span>
+              <div className="flex flex-col leading-tight">
+                <small className="text-xs">บันทึกเมื่อ</small>
+                <time className="text-sm text-gray-700">{dateTime(item.recordedAt)} น.</time>
+              </div>
+            </div>
+          </article>
+        ))
+      )}
+    </aside>
+  );
+}
+
+function toDateTimeInput(timestamp: number) {
+  const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60_000);
+  return date.toISOString().slice(0, 16);
 }
